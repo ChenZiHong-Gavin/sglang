@@ -9646,19 +9646,28 @@ class ServerArgs:
             # A configuration built before resolution describes the path the
             # caller typed; the GGUF and ModelScope handlers declare a
             # different `model_path`, and every later decision keyed on the
-            # architecture would read the wrong contents. Only a real
-            # `ModelConfig` is checked -- a fixture's stand-in stays untouched.
-            if not (
-                isinstance(memo, ModelConfig) and memo.model_path != self.model_path
-            ):
+            # architecture would read the wrong contents. The key is the path
+            # this record carried when the cache was filled: `ModelConfig`
+            # re-points its own `model_path` at the local pull directory when
+            # the weights sit behind an object-store URI, so the built object's
+            # field answers a different question. A stand-in a fixture supplied
+            # leaves no key behind and is handed back as it is.
+            built_from = self.__dict__.get("_model_config_built_from")
+            if built_from is None or built_from == self.model_path:
                 return memo
-        self.model_config = ModelConfig.from_server_args(self)
-        if self.model_config.is_hybrid_swa:
+
+        model_config = ModelConfig.from_server_args(self)
+        # The cache and its key are the record's own bookkeeping, and the key
+        # invalidates the cache on a record that is already resolved, so the
+        # refill goes past the read-only guard.
+        object.__setattr__(self, "model_config", model_config)
+        object.__setattr__(self, "_model_config_built_from", self.model_path)
+        if model_config.is_hybrid_swa:
             logger.info(
                 "Hybrid SWA model detected. architectures=%s",
-                self.model_config.hf_config.architectures,
+                model_config.hf_config.architectures,
             )
-        return self.model_config
+        return model_config
 
     def _resolved(self):
         """Read-only view of the resolving configuration: declared fields
